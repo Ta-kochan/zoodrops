@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#2ea44f">
 <link rel="manifest" href="manifest.json">
-<title>ZooDrops – Mobile App</title>
+<title>ZooDrops – Mobile App (fixed)</title>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -20,7 +20,7 @@
     radial-gradient(45% 55% at 50% 90%, rgba(255,224,115,.24), transparent 60%),
     linear-gradient(180deg,#9bd3ff,#e8e3ff)}
   canvas{display:block;max-width:100vw;max-height:100vh}
-  /* UI オーバーレイ（タイトル/メニュー/リザルト等） */
+  /* UI オーバーレイ（タイトル/メニュー/図鑑/リザルト） */
   #ui{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none}
   .card{pointer-events:auto;background:var(--glass);border:1px solid var(--b);border-radius:16px;padding:18px 16px;box-shadow:0 12px 30px rgba(16,24,40,.14);backdrop-filter: blur(10px);min-width:min(92vw,460px);max-width:min(92vw,560px)}
   .title{font-weight:800;font-size:1.8rem;letter-spacing:.5px;display:flex;align-items:center;gap:.6rem;justify-content:center}
@@ -35,8 +35,9 @@
   .dexItem{aspect-ratio:1;border:1px solid var(--b);border-radius:12px;display:grid;place-items:center;background:#fff;position:relative;overflow:hidden}
   .dexItem.locked::after{content:"LOCK";position:absolute;inset:auto 6px 6px auto;background:rgba(0,0,0,.5);color:#fff;font-size:.7rem;padding:.2rem .4rem;border-radius:6px}
   .dexItem img{max-width:80%;max-height:80%}
+  .dexProg{position:absolute;right:6px;bottom:6px;background:rgba(0,0,0,.55);color:#fff;font-size:.7rem;padding:.15rem .4rem;border-radius:6px}
   .dexFact{margin-top:10px;background:#fff;border:1px solid var(--b);border-radius:12px;padding:10px}
-  /* トースト/ミニ演出 */
+  /* トースト */
   #toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--glass);border:1px solid var(--b);padding:8px 14px;border-radius:999px;font-weight:800;opacity:0;pointer-events:none}
 </style>
 </head>
@@ -50,8 +51,8 @@
 <script>
 'use strict';
 
-/* ===================== 基本設定（フルスクリーン＆高解像度） ===================== */
-const COLS=9, ROWS=16, PPU=14; // ★内部解像度UP（見た目のクリアさ向上）
+/* ===================== 基本設定 ===================== */
+const COLS=9, ROWS=16, PPU=14;             // 内部解像度UP（見た目のクリアさ向上）
 const W=COLS*PPU, H=ROWS*PPU;
 const DPR = window.devicePixelRatio||1;
 
@@ -60,22 +61,22 @@ const vctx=view.getContext('2d'); vctx.imageSmoothingEnabled=true; vctx.imageSmo
 let PIX=1; // スクリーン倍率（viewportにフィット）
 
 /* ===================== シーン管理 ===================== */
-let SCENE='boot'; // 'title'|'menu'|'play'|'pause'|'over'|'options'|'dex'
+let SCENE='boot'; // 'title'|'menu'|'play'|'over'|'options'|'dex'
 const ui=document.getElementById('ui');
 function setScene(s){ SCENE=s; renderUI(); }
 
 /* ===================== ゲームステート ===================== */
 let state='paused', last=0, score=0, totalClears=0, lastChain=0, startTime=0, playTimeMs=0;
-let nextId=1, active=null, upNext=null, floaters=[], particles=[], scorePops=[], clouds=[], flash=0;
+let nextId=1, active=null, floaters=[], particles=[], scorePops=[], clouds=[], flash=0;
 let board, pidMap, bCanvas, bctx, bImage, registry;
 const CLEAR_COUNT=3, LOCK_DELAY=260, LOCK_VEL_EPS=0.022, BASE_SPAWN_Y=-6, ALPHA_TH=24;
 
-/* 物理（前回版の“超スロー開始・緩やか加速＋空気抵抗”） */
+/* 物理 */
 const GRAVITY_BASE=0.0026, RAMP_START=0.025, RAMP_END=0.90, RAMP_MS=240000, AIR_DRAG=0.0012, RESTITUTION=0.52;
 const REST_V0=0.03, REST_V1=0.22, REST_MIN=0.08, STUCK_BOUNCE_VEL=0.08, WOBBLE_MAX=10;
 function restitutionForSpeed(preVy){ const v=Math.abs(preVy); if(v<=REST_V0) return 0; const t=Math.min(1,Math.max(0,(v-REST_V0)/(REST_V1-REST_V0))); const s=t*t*(3-2*t); return REST_MIN+(RESTITUTION-REST_MIN)*s; }
 
-/* ピースの描画スケール（50〜120%ランダム）＋安全フィット */
+/* ピースの描画スケール */
 const GLOBAL_SCALE=0.05, SCALE_MIN_MULT=0.50, SCALE_MAX_MULT=1.20, AUTO_FIT=true, FIT_FRACTION=0.30;
 
 /* 画像・種別 */
@@ -83,10 +84,21 @@ let SPECIES=[], speciesByIdx={}, bag;
 function imgW(img){ return (img.width||img.naturalWidth||48); }
 function imgH(img){ return (img.height||img.naturalHeight||48); }
 
-/* 図鑑（ローカル保存） */
-const LSKEY='zoodrops.progress.v2';
+/* 図鑑（ローカル保存：v3に更新） */
+const LSKEY='zoodrops.progress.v3';
 let progress = loadProgress();
-function loadProgress(){ try{ return JSON.parse(localStorage.getItem(LSKEY))||{dex:{},opt:{sfx:true,bgm:false,vibe:true}} }catch{ return {dex:{},opt:{sfx:true,bgm:false,vibe:true}}; } }
+function loadProgress(){
+  try{
+    const p = JSON.parse(localStorage.getItem(LSKEY)) || JSON.parse(localStorage.getItem('zoodrops.progress.v2')) || {};
+    return {
+      dex: p.dex || {},                 // {speciesIdx: true}
+      dexCount: p.dexCount || {},       // {speciesIdx: number} ← NEW
+      opt: p.opt || {sfx:true,bgm:false,vibe:true}
+    };
+  }catch{
+    return { dex:{}, dexCount:{}, opt:{sfx:true,bgm:false,vibe:true} };
+  }
+}
 function saveProgress(){ try{ localStorage.setItem(LSKEY, JSON.stringify(progress)); }catch{} }
 
 /* ===================== 盤面バッファ ===================== */
@@ -101,7 +113,7 @@ function setPixelRGBA(x,y,species,id,r,g,b,a){ if(x<0||x>=W||y<0||y>=H) return; 
 function blitBoard(){ bctx.putImageData(bImage,0,0); }
 function topRowOccupied(){ for(let x=0;x<W;x++) if(board[x]!==0) return true; return false; }
 
-/* ===================== 背景（濃い草原＋雲） ===================== */
+/* ===================== 背景（草原＋雲） ===================== */
 const bgCanvas=document.createElement('canvas'); bgCanvas.width=W; bgCanvas.height=H; const bgctx=bgCanvas.getContext('2d');
 function buildBG(){
   const gTop=bgctx.createLinearGradient(0,0,0,H*0.7); gTop.addColorStop(0,'#9bd3ff'); gTop.addColorStop(1,'#dde5ff'); bgctx.fillStyle=gTop; bgctx.fillRect(0,0,W,H);
@@ -112,11 +124,11 @@ function buildBG(){
   const vign=bgctx.createRadialGradient(W/2,H*0.55,Math.min(W,H)*0.2,W/2,H*0.55,Math.max(W,H)*0.75); vign.addColorStop(0,'rgba(0,0,0,0)'); vign.addColorStop(1,'rgba(0,0,0,0.18)'); bgctx.fillStyle=vign; bgctx.fillRect(0,0,W,H);
   bgctx.strokeStyle='rgba(15,23,42,.28)'; bgctx.strokeRect(0.6,0.6,W-1.2,H-1.2);
 }
-function initClouds(){ clouds.length=0; for(let i=0;i<9;i++) clouds.push({x:Math.random()*W,y:H*(0.10+Math.random()*0.18),s:0.8+Math.random()*1.6,a:0.20+Math.random()*0.20,vx:0.010+Math.random()*0.028,wob:Math.random()*Math.PI*2}); }
+let clouds=[]; function initClouds(){ clouds.length=0; for(let i=0;i<9;i++) clouds.push({x:Math.random()*W,y:H*(0.10+Math.random()*0.18),s:0.8+Math.random()*1.6,a:0.20+Math.random()*0.20,vx:0.010+Math.random()*0.028,wob:Math.random()*Math.PI*2}); }
 function updateClouds(dt){ for(const c of clouds){ c.x+=c.vx*dt; c.wob+=dt*0.0022; c.y+=Math.sin(c.wob)*0.02; const w=26*c.s; if(c.x>W+w) c.x=-w; } }
 function drawCloud(ctx,cx,cy,s,a,pix){ ctx.save(); ctx.globalAlpha=a; ctx.fillStyle='#fff'; const blobs=[{dx:-8,dy:2,r:6},{dx:-2,dy:0,r:8},{dx:6,dy:1,r:6},{dx:2,dy:3,r:5}]; for(const b of blobs){ const x=(cx+b.dx*s)*pix,y=(cy+b.dy*s)*pix,r=b.r*s*pix; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=a*0.25; ctx.fillStyle='rgba(0,0,0,.18)'; const sx=(cx+2*s)*pix,sy=(cy+6*s)*pix,sr=7*s*pix; ctx.beginPath(); ctx.ellipse(sx,sy,sr,sr*0.35,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
 
-/* ===================== アセット読込（画像・プレースホルダ） ===================== */
+/* ===================== アセット読込 ===================== */
 function makePlaceholder(drawFn){ const c=document.createElement('canvas'); c.width=64;c.height=64; const ctx=c.getContext('2d'); ctx.imageSmoothingEnabled=true; drawFn(ctx,64,64); const img=new Image(); img.src=c.toDataURL('image/png'); return new Promise(res=>img.onload=()=>res(img)); }
 function phGiraffe(ctx,w,h){ ctx.fillStyle='#f5c64b'; ctx.fillRect(w*.62,h*.15,w*.08,h*.42); ctx.beginPath(); ctx.arc(w*.66,h*.15,w*.08,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#f5c64b'; ctx.beginPath(); ctx.ellipse(w*.42,h*.55,w*.26,h*.22,0,0,Math.PI*2); ctx.fill(); }
 function phElephant(ctx,w,h){ ctx.fillStyle='#a3a9b2'; ctx.beginPath(); ctx.ellipse(w*.48,h*.55,w*.34,h*.25,0,0,Math.PI*2); ctx.fill(); }
@@ -150,7 +162,7 @@ function rasterize(img, scale, angleDeg){
 async function loadAssets(){
   const note=[];
   async function get(name,ph){
-    try{ const {img}=await safeLoadImage(`assets/${name}.png`); try{ rasterize(img,1,0); return img;}catch{ note.push(`${name}: file://環境は解析不可→PH`); return await makePlaceholder(ph);} }
+    try{ const {img}=await safeLoadImage(`assets/${name}.png`); try{ rasterize(img,1,0); return img;}catch{ note.push(`${name}: file://解析不可→PH`); return await makePlaceholder(ph);} }
     catch{ note.push(`${name}: 読込失敗→PH`); return await makePlaceholder(ph); }
   }
   const giraffe=await get('giraffe',phGiraffe), elephant=await get('elephant',phElephant), zebra=await get('zebra',phZebra), tiger=await get('tiger',phTiger), kangaroo=await get('kangaroo',phKangaroo);
@@ -200,69 +212,99 @@ function clearPieceOnBoard(id){
   blitBoard();
 }
 
-/* ===================== 入力：1本指で移動＆回転（円運動検出） ===================== */
+/* ===================== 入力：スマホ（2本指回転／1本指ドラッグ＆フリック） ===================== */
 const wrap=document.getElementById('stage');
 const pointers=new Map();
-const gesture={mode:'idle',startX:0,startY:0,lastX:0,lastY:0,accX:0,accY:0,startT:0, rotRef:0, rotApplied:0};
-const MOVE_STEP_X=4, MOVE_STEP_Y=4, HARD_SPEED=0.9, MIN_FLICK_DIST=30, ROT_APPLY_STEP=6, ROT_DETECT_DEG=14, ROT_RADIUS=18;
+const gesture={
+  primary:null, startX:0,startY:0,lastX:0,lastY:0,accX:0,accY:0,startT:0,
+  rotating:false, rotStart:0, pieceStartAng:0, applied:0
+};
+const MOVE_STEP_X=4, MOVE_STEP_Y=4, HARD_SPEED=0.9, MIN_FLICK_DIST=30, ROT_APPLY_STEP=6;
+
 function toBoardXY(e){ const r=view.getBoundingClientRect(); return {x:(e.clientX-r.left)/PIX, y:(e.clientY-r.top)/PIX}; }
-function angleDeg(cx,cy,px,py){ return Math.atan2(py-cy, px-cx)*180/Math.PI; }
+function angleDeg(p1,p2){ return Math.atan2(p2.y-p1.y, p2.x-p1.x)*180/Math.PI; }
 
 wrap.addEventListener('pointerdown',e=>{
-  if(SCENE!=='play'||state!=='playing') return;
+  if(SCENE!=='play') return;
   e.preventDefault(); wrap.setPointerCapture(e.pointerId);
-  const p=toBoardXY(e); pointers.set(e.pointerId,{x:p.x,y:p.y,t:performance.now()});
-  if(pointers.size===1 && active){
-    gesture.mode='pending'; gesture.startX=p.x; gesture.startY=p.y; gesture.lastX=p.x; gesture.lastY=p.y; gesture.accX=0; gesture.accY=0; gesture.startT=performance.now(); gesture.rotRef=angleDeg(active.x,active.y,p.x,p.y); gesture.rotApplied=0;
+  const pt=toBoardXY(e);
+  pointers.set(e.pointerId,{x:pt.x,y:pt.y,t:performance.now()});
+
+  if(pointers.size===1){
+    // 1本指：移動/フリック
+    gesture.primary=e.pointerId; gesture.startX=pt.x; gesture.startY=pt.y;
+    gesture.lastX=pt.x; gesture.lastY=pt.y; gesture.accX=0; gesture.accY=0;
+    gesture.startT=performance.now(); gesture.rotating=false; gesture.applied=0;
+  }else if(pointers.size===2){
+    // 2本指：回転
+    const it=[...pointers.values()];
+    gesture.rotating=true;
+    gesture.rotStart=angleDeg(it[0],it[1]);
+    gesture.pieceStartAng=active? active.ang:0;
+    gesture.applied=0;
   }
 },{passive:false});
+
 wrap.addEventListener('pointermove',e=>{
-  if(SCENE!=='play'||state!=='playing') return;
+  if(SCENE!=='play'||state==='over') return;
   if(!pointers.has(e.pointerId)) return;
-  const p=toBoardXY(e), now=performance.now(); const item=pointers.get(e.pointerId); item.x=p.x; item.y=p.y; item.t=now;
-  if(!active) return;
+  const pt=toBoardXY(e);
+  const p=pointers.get(e.pointerId); p.x=pt.x; p.y=pt.y; p.t=performance.now();
 
-  // モード決定（回転 or ドラッグ）
-  if(gesture.mode==='pending'){
-    const dx=p.x-gesture.startX, dy=p.y-gesture.startY, r=Math.hypot(dx,dy);
-    const angle = angleDeg(active.x,active.y,p.x,p.y);
-    const dAng = Math.abs(((angle - gesture.rotRef + 540)%360)-180);
-    if(r<=ROT_RADIUS && dAng>=ROT_DETECT_DEG){ gesture.mode='rotate'; return; }
-    if(Math.abs(dx)>=MOVE_STEP_X || Math.abs(dy)>=MOVE_STEP_Y){ gesture.mode='drag'; }
-  }
-
-  if(gesture.mode==='rotate'){
-    const ang=angleDeg(active.x,active.y,p.x,p.y);
-    let delta=((ang - gesture.rotRef + 540)%360)-180;
+  // 2本指回転
+  if(pointers.size>=2 && active){
+    const it=[...pointers.values()];
+    const curr=angleDeg(it[0],it[1]);
+    let delta=curr - gesture.rotStart;
+    delta=((delta+540)%360)-180; // -180..180
     // ステップ適用
-    while(Math.abs(delta - gesture.rotApplied) >= ROT_APPLY_STEP){
-      const step = ROT_APPLY_STEP * Math.sign(delta - gesture.rotApplied);
-      tryRotateTo(active, active.ang + step);
-      gesture.rotApplied += step;
+    while(Math.abs(delta - gesture.applied) >= ROT_APPLY_STEP){
+      const step = ROT_APPLY_STEP * Math.sign(delta - gesture.applied);
+      const ok = tryRotateTo(active, active.ang + step);
+      if(!ok) break;
+      gesture.applied += step;
     }
     return;
   }
 
-  if(gesture.mode==='drag'){
-    const dx=p.x-gesture.lastX, dy=p.y-gesture.lastY;
-    gesture.lastX=p.x; gesture.lastY=p.y; gesture.accX+=dx; gesture.accY+=dy;
-    while(Math.abs(gesture.accX)>=MOVE_STEP_X){ const dir=Math.sign(gesture.accX); if(!collidesAt(active.x+dir,active.y,active.rot)){ active.x+=dir; playSFX('move'); } gesture.accX-=dir*MOVE_STEP_X; }
-    while(gesture.accY>=MOVE_STEP_Y){ if(!moveWithCollision(active,1)) { active.contact=active.contact||now; break; } gesture.accY-=MOVE_STEP_Y; score+=0.2; }
+  // 1本指：左右移動＋下送り（ソフト）
+  if(gesture.primary===e.pointerId && active && state==='playing'){
+    const dx=pt.x - gesture.lastX;
+    const dy=pt.y - gesture.lastY;
+    gesture.lastX=pt.x; gesture.lastY=pt.y;
+    gesture.accX += dx; gesture.accY += dy;
+
+    while(Math.abs(gesture.accX)>=MOVE_STEP_X){
+      const dir = Math.sign(gesture.accX);
+      if(!collidesAt(active.x+dir, active.y, active.rot)){ active.x += dir; playSFX('move'); }
+      gesture.accX -= dir*MOVE_STEP_X;
+    }
+    while(gesture.accY >= MOVE_STEP_Y){
+      if(!moveWithCollision(active, 1)) { active.contact = active.contact||performance.now(); break; }
+      gesture.accY -= MOVE_STEP_Y;
+      score += 0.2;
+    }
   }
 },{passive:false});
-function endPointer(e){
+
+function releasePointer(e){
   if(!pointers.has(e.pointerId)) return;
-  const ended=pointers.get(e.pointerId); pointers.delete(e.pointerId);
-  if(SCENE==='play'&&state==='playing'&&gesture.mode!=='rotate'){
-    const dt=performance.now()-gesture.startT, dy=ended.y-gesture.startY, vy=dy>0?dy/dt:0;
+  const ended=pointers.get(e.pointerId);
+  pointers.delete(e.pointerId);
+
+  if(SCENE==='play' && state==='playing' && !gesture.rotating && e.pointerId===gesture.primary){
+    // 下フリック（ハードドロップ）
+    const dt=performance.now() - gesture.startT;
+    const dy=ended.y - gesture.startY;
+    const vy= dy>0 ? dy/dt : 0;
     if(dy>MIN_FLICK_DIST && vy>HARD_SPEED){ hard(); }
   }
-  if(pointers.size===0) gesture.mode='idle';
+  if(pointers.size<2){ gesture.rotating=false; gesture.applied=0; }
 }
-wrap.addEventListener('pointerup',endPointer,{passive:false});
-wrap.addEventListener('pointercancel',endPointer,{passive:false});
+wrap.addEventListener('pointerup', releasePointer, {passive:false});
+wrap.addEventListener('pointercancel', releasePointer, {passive:false});
 
-/* ===================== キー操作（PC用） ===================== */
+/* ===================== キー操作（PCデバッグ用） ===================== */
 const key={}; document.addEventListener('keydown',e=>{ key[e.key]=true; if(SCENE!=='play') return;
   if(e.key==='ArrowLeft') nudge(-1,0,0);
   if(e.key==='ArrowRight') nudge(1,0,0);
@@ -281,7 +323,7 @@ function nudge(dx,dy,dang){
   if(!collidesAt(nx,ny,cand.rot)){ active.x=nx; active.y=ny; if(dang){ active.ang=cand.ang; active.rot=cand.rot; playSFX('rot'); } }
 }
 
-/* ===================== 物理・ループ ===================== */
+/* ===================== 物理・ループ（★停止バグ修正） ===================== */
 function integrateVelocity(vy,g,dt){ const c=AIR_DRAG; if(c>0){ const e=Math.exp(-c*dt); return vy*e+(g/c)*(1-e);} return vy+g*dt; }
 function moveWithCollision(body,dy){ const dir=Math.sign(dy)||1; let remain=Math.abs(dy); const STEP=0.25; let moved=false; while(remain>0){ const s=Math.min(STEP,remain); const ny=body.y+dir*s; if(collidesAt(body.x,ny,body.rot)) return moved; body.y=ny; remain-=s; moved=true; } return true; }
 
@@ -292,40 +334,41 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 function loop(now){
-  if(SCENE!=='play'||state!=='playing') return;
+  if(SCENE!=='play' || state==='over') return;      // ★ resolving でも回す
   const dt=now-last; last=now; playTimeMs = now - startTime;
   updateClouds(dt);
 
-  // 入力（キーの連続処理）
-  if(key['ArrowLeft']) nudge(-1,0,0);
-  if(key['ArrowRight']) nudge(1,0,0);
+  if(state==='playing'){
+    if(key['ArrowLeft']) nudge(-1,0,0);
+    if(key['ArrowRight']) nudge(1,0,0);
 
-  const g=GRAVITY_BASE*gravityScale(now);
-  active.vy=integrateVelocity(active.vy,g,dt);
-  const fall=active.vy*dt;
-  if(!moveWithCollision(active,fall)){
-    if(active.vy>0){
-      const impactY=Math.floor(active.y), pre=active.vy, R=restitutionForSpeed(pre);
-      active.y=impactY; active.vy=-pre*R; if(R===0) active.contact=now-LOCK_DELAY;
-      const bounced=Math.abs(active.vy), near=(active.lastHitY===null)||Math.abs(impactY-active.lastHitY)<=1; active.lastHitY=impactY;
-      if(near && bounced<STUCK_BOUNCE_VEL) active.wobble++; else active.wobble=0;
-      if(active.wobble>=WOBBLE_MAX){ active.vy=0; active.contact=now-LOCK_DELAY; }
-      playSFX('land');
-    }
-    if(Math.abs(active.vy)<LOCK_VEL_EPS){ active.contact=active.contact||now; if(now-active.contact>=LOCK_DELAY) lockActive(); }
-  }else{ active.contact=null; active.wobble=0; active.lastHitY=null; }
+    const g=GRAVITY_BASE*gravityScale(now);
+    active.vy=integrateVelocity(active.vy,g,dt);
+    const fall=active.vy*dt;
+    if(!moveWithCollision(active,fall)){
+      if(active.vy>0){
+        const impactY=Math.floor(active.y), pre=active.vy, R=restitutionForSpeed(pre);
+        active.y=impactY; active.vy=-pre*R; if(R===0) active.contact=now-LOCK_DELAY;
+        const bounced=Math.abs(active.vy), near=(active.lastHitY===null)||Math.abs(impactY-active.lastHitY)<=1; active.lastHitY=impactY;
+        if(near && bounced<STUCK_BOUNCE_VEL) active.wobble++; else active.wobble=0;
+        if(active.wobble>=WOBBLE_MAX){ active.vy=0; active.contact=now-LOCK_DELAY; }
+        playSFX('land');
+      }
+      if(Math.abs(active.vy)<LOCK_VEL_EPS){ active.contact=active.contact||now; if(now-active.contact>=LOCK_DELAY) lockActive(); }
+    }else{ active.contact=null; active.wobble=0; active.lastHitY=null; }
+  }else if(state==='resolving'){
+    updateFloaters(dt, now);
+  }
 
-  if(state==='resolving') updateFloaters(dt,now);
   updateParticles(dt); updateScorePops(dt); draw();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(loop);                     // ★ 継続
 }
 
-/* ===================== 消去・落下・連鎖 ===================== */
+/* ===================== 消去・落下・連鎖（★図鑑=3回で解放） ===================== */
 const speciesStreak=new Uint16Array(16);
 function lockActive(){
   const id=nextId++; const {overflow}=placeToBoard(id,active.species,active.x,active.y,active.rot);
   registry.set(id,{id,species:active.species,x:active.x,y:active.y,ang:active.ang,rot:active.rot,baseImg:active.baseImg,scale:active.scale,name:active.name});
-  // ▲着地時の鳴き声（任意）
   playCry(active.species);
   active=null; if(overflow||topRowOccupied()){ gameOver('最上段に到達'); return; }
   state='resolving'; lastChain=0; resolveStep();
@@ -348,24 +391,41 @@ function findMatchGroups(){
 }
 function resolveStep(){
   const groups=findMatchGroups();
-  if(groups.length===0){ if(floaters.length===0){ active=newActive(); if(collidesAt(active.x,active.y,active.rot)){ gameOver('スペースがありません'); return; } state='playing'; } return; }
+  if(groups.length===0){
+    if(floaters.length===0){
+      active=newActive();
+      if(collidesAt(active.x,active.y,active.rot)){ gameOver('スペースがありません'); return; }
+      state='playing';
+    }
+    return;
+  }
 
   const chainFactor=Math.max(1,1+(lastChain)*0.6);
-  const toDelete=new Set(); let stepPoints=0; const clearedSpeciesThisStep=new Set(); const unlockedNow=[];
+  const toDelete=new Set(); let stepPoints=0;
+  const clearedSpeciesThisStep=new Set();
+  const unlockedNow=[];
+
   for(const g of groups){
+    // 得点・消去
     let sx=0,sy=0,n=0; for(const id of g.ids){ const rec=registry.get(id); if(rec){ sx+=rec.x; sy+=rec.y; n++; } toDelete.add(id); }
     const base=60*g.ids.size, pts=Math.floor(base*chainFactor); stepPoints+=pts; clearedSpeciesThisStep.add(g.species);
     if(n>0) spawnScorePop(sx/n, sy/n, '+'+pts.toLocaleString(), speciesColor(g.species), false);
-    // 図鑑アンロック：この“1回の消去”が3個以上なら解放（CLEAR_COUNT=3 なので常に対象）
-    if(!progress.dex[g.species]){ progress.dex[g.species]=true; unlockedNow.push(g.species); saveProgress(); }
+
+    // ★図鑑：この“1回の消去”を 1カウント加算、3回で解放
+    const sp=g.species;
+    progress.dexCount[sp] = (progress.dexCount[sp]||0) + 1;
+    if(!progress.dex[sp] && progress.dexCount[sp] >= 3){
+      progress.dex[sp] = true;
+      unlockedNow.push(sp);
+    }
   }
-  if(unlockedNow.length) showToast(`図鑑：${unlockedNow.map(sp=>speciesByIdx[sp]?.name||'動物').join('・')} を解放！`);
+  if(unlockedNow.length){ saveProgress(); showToast(`図鑑：${unlockedNow.map(sp=>speciesByIdx[sp]?.name||'動物').join('・')} を解放！`); }
 
   spawnClearParticles(toDelete); flash=Math.min(0.18, flash+0.14); playSFX('clear');
   lastChain++; score+=stepPoints; totalClears+=groups.length;
   for(const id of toDelete){ clearPieceOnBoard(id); registry.delete(id); }
 
-  // “3回で全消し”
+  // “3回で全消し”ルール
   const toWipe=[];
   for(const sp of clearedSpeciesThisStep){ speciesStreak[sp]+=1; if(speciesStreak[sp]>=3){ speciesStreak[sp]=0; toWipe.push(sp); } }
   for(const sp of toWipe){
@@ -393,7 +453,14 @@ function updateFloaters(dt,now){
     if(!moveFloater(f,fall)){
       if(f.vy>0){ const impactY=Math.floor(f.y),pre=f.vy,R=restitutionForSpeed(pre); f.y=impactY; f.vy=-pre*R; if(R===0) f.contact=performance.now()-LOCK_DELAY;
         const bounced=Math.abs(f.vy), near=(f.lastHitY===null)||Math.abs(impactY-f.lastHitY)<=1; f.lastHitY=impactY; if(near && bounced<STUCK_BOUNCE_VEL) f.wobble++; else f.wobble=0; if(f.wobble>=WOBBLE_MAX){ f.vy=0; f.contact=performance.now()-LOCK_DELAY; } }
-      if(Math.abs(f.vy)<LOCK_VEL_EPS){ f.contact=f.contact||performance.now(); if(performance.now()-f.contact>=LOCK_DELAY){ const {overflow}=placeToBoard(f.id,f.species,f.x,f.y,f.rot); registry.set(f.id,{id:f.id,species:f.species,x:f.x,y:f.y,ang:f.ang,rot:f.rot,baseImg:f.baseImg,scale:f.scale}); f.settling=true; if(overflow){ gameOver('最上段に到達'); return; } } }
+      if(Math.abs(f.vy)<LOCK_VEL_EPS){
+        f.contact=f.contact||performance.now();
+        if(performance.now()-f.contact>=LOCK_DELAY){
+          const {overflow}=placeToBoard(f.id,f.species,f.x,f.y,f.rot);
+          registry.set(f.id,{id:f.id,species:f.species,x:f.x,y:f.y,ang:f.ang,rot:f.rot,baseImg:f.baseImg,scale:f.scale});
+          f.settling=true; if(overflow){ gameOver('最上段に到達'); return; }
+        }
+      }
     }else{ f.contact=0; f.wobble=0; f.lastHitY=null; }
   }
   floaters=floaters.filter(f=>!f.settling);
@@ -429,17 +496,16 @@ function draw(){
   view.width=Math.floor(W*PIX*DPR); view.height=Math.floor(H*PIX*DPR); vctx.setTransform(DPR,0,0,DPR,0,0);
   vctx.clearRect(0,0,view.width/DPR,view.height/DPR);
 
-  // 背景・雲・盤面
-  vctx.drawImage(bgCanvas,0,0,W*PIX,H*PIX); for(const c of clouds) drawCloud(vctx,c.x,c.y,c.s,c.a,PIX); vctx.drawImage(bCanvas,0,0,W*PIX,H*PIX);
+  vctx.drawImage(bgCanvas,0,0,W*PIX,H*PIX);
+  for(const c of clouds) drawCloud(vctx,c.x,c.y,c.s,c.a,PIX);
+  vctx.drawImage(bCanvas,0,0,W*PIX,H*PIX);
 
-  // アクティブ＆浮遊体（高品質 drawImage）
   const drawRot=(x,y,rot)=>{ const w=rot.w,h=rot.h,x0=(x-w/2),y0=(y-h/2); if(rot.canvas){ vctx.drawImage(rot.canvas,x0*PIX,y0*PIX,w*PIX,h*PIX); } else {
     for(let yy=0;yy<h;yy++) for(let xx=0;xx<w;xx++){ const i=(yy*w+xx)*4,a=rot.rgba[i+3]; if(a<ALPHA_TH) continue; const bx=x0+xx,by=y0+yy; if(by<0||bx<0||bx>=W||by>=H) continue; vctx.fillStyle=`rgb(${rot.rgba[i]},${rot.rgba[i+1]},${rot.rgba[i+2]})`; vctx.fillRect(bx*PIX,by*PIX,PIX,PIX); }
   }};
   if(active) drawRot(active.x,active.y,active.rot);
   for(const f of floaters) drawRot(f.x,f.y,f.rot);
 
-  // パーティクル・ポップ・フラッシュ
   if(particles.length){ vctx.save(); for(const p of particles){ const a=1-(p.age/p.life); if(a<=0) continue; vctx.globalAlpha=Math.max(0,Math.min(1,a)); vctx.fillStyle=`rgb(${p.r},${p.g},${p.b})`; vctx.fillRect(p.x*PIX,p.y*PIX,PIX,PIX);} vctx.restore(); }
   drawScorePops(PIX);
   if(flash>0){ vctx.save(); vctx.globalAlpha=flash; vctx.fillStyle='rgba(255,255,255,.9)'; vctx.fillRect(0,0,W*PIX,H*PIX); vctx.restore(); }
@@ -465,15 +531,10 @@ function evaluate(sc, ch, cl, t){
   return 'D';
 }
 
-/* ===================== サウンド（任意SFX/BGM） ===================== */
-const SFX={
-  move:null, rot:null, land:null, clear:null, full:null,
-  cry:{1:null,2:null,3:null,4:null,5:null},
-  bgm:null, ctx:null, unlocked:false
-};
+/* ===================== サウンド ===================== */
+const SFX={ move:null, rot:null, land:null, clear:null, full:null, cry:{1:null,2:null,3:null,4:null,5:null}, bgm:null, ctx:null, unlocked:false };
 function initAudio(){
   try{ SFX.ctx = new (window.AudioContext||window.webkitAudioContext)(); }catch{}
-  // 任意ファイル読み込み（存在しなければ簡易ビープ）
   loadBuffer('assets/sfx/move.ogg','move'); loadBuffer('assets/sfx/rotate.ogg','rot');
   loadBuffer('assets/sfx/land.ogg','land'); loadBuffer('assets/sfx/clear.ogg','clear'); loadBuffer('assets/sfx/full.ogg','full');
   loadBuffer('assets/sfx/giraffe.ogg', 'cry',1); loadBuffer('assets/sfx/elephant.ogg','cry',2);
@@ -486,16 +547,11 @@ async function loadBuffer(url, key, sub){
   catch{ /* 無ければ無音のまま */ }
 }
 async function loadMusic(url){ try{ const r=await fetch(url); if(!r.ok) throw 0; const b=await r.arrayBuffer(); SFX.bgm = await SFX.ctx.decodeAudioData(b); }catch{} }
-function unlockAudio(){ if(SFX.unlocked||!SFX.ctx) return; SFX.unlocked=true; // iOS対策
-  const o=SFX.ctx.createOscillator(), g=SFX.ctx.createGain(); o.type='sine'; o.frequency.value=1; g.gain.value=0; o.connect(g).connect(SFX.ctx.destination); o.start(); o.stop(SFX.ctx.currentTime+0.01);
-  if(progress.opt.bgm && SFX.bgm) playBGM();
-}
+function unlockAudio(){ if(SFX.unlocked||!SFX.ctx) return; SFX.unlocked=true; const o=SFX.ctx.createOscillator(), g=SFX.ctx.createGain(); o.type='sine'; o.frequency.value=1; g.gain.value=0; o.connect(g).connect(SFX.ctx.destination); o.start(); o.stop(SFX.ctx.currentTime+0.01); if(progress.opt.bgm && SFX.bgm) playBGM(); }
 function playSFX(kind){
   if(!progress.opt.sfx || !SFX.ctx) return;
   const src=SFX.ctx.createBufferSource(), gain=SFX.ctx.createGain(); src.connect(gain).connect(SFX.ctx.destination); gain.gain.value=0.8;
-  let buf=SFX[kind]; if(!buf){ // 簡易ビープ
-    const o=SFX.ctx.createOscillator(); const g=SFX.ctx.createGain(); o.type='triangle'; o.frequency.value=(kind==='rot'?680:(kind==='clear'?520:440)); g.gain.value=0.04; o.connect(g).connect(SFX.ctx.destination); o.start(); o.stop(SFX.ctx.currentTime+0.05); return;
-  }
+  let buf=SFX[kind]; if(!buf){ const o=SFX.ctx.createOscillator(); const g=SFX.ctx.createGain(); o.type='triangle'; o.frequency.value=(kind==='rot'?680:(kind==='clear'?520:440)); g.gain.value=0.04; o.connect(g).connect(SFX.ctx.destination); o.start(); o.stop(SFX.ctx.currentTime+0.05); return; }
   src.buffer=buf; src.start();
 }
 function playCry(sp){ if(!progress.opt.sfx||!SFX.ctx) return; const buf=SFX.cry[sp]; if(!buf) return; const s=SFX.ctx.createBufferSource(); s.buffer=buf; s.connect(SFX.ctx.destination); s.start(); if(progress.opt.vibe&&navigator.vibrate) navigator.vibrate(20); }
@@ -530,15 +586,13 @@ function renderUI(payload={}){
         <button id="mDex">📖 図鑑</button>
         <button id="mOpt">⚙ オプション</button>
         <button id="mQuit">⏹ 終了</button>
-        <div class="hint">操作：1本指で左右／下フリックで落下／小さく円を描くと回転</div>
+        <div class="hint">操作：1本指で左右／下フリックで落下／<strong>2本指で回転</strong></div>
       </div>
     `);
     document.getElementById('mPlay').onclick=()=>{ setScene('play'); startGame(); if(progress.opt.bgm) playBGM(); };
     document.getElementById('mDex').onclick=()=>setScene('dex');
     document.getElementById('mOpt').onclick=()=>setScene('options');
-    document.getElementById('mQuit').onclick=()=>{ // PWAは閉じられないことが多い
-      showToast('ホームへ戻るか、タブを閉じてください'); try{ window.close(); }catch{}
-    };
+    document.getElementById('mQuit').onclick=()=>{ showToast('ホームへ戻るか、タブを閉じてください'); try{ window.close(); }catch{} };
     return;
   }
   if(SCENE==='options'){
@@ -560,11 +614,15 @@ function renderUI(payload={}){
   if(SCENE==='dex'){
     const items = SPECIES.map(s=>{
       const locked=!progress.dex[s.idx];
-      return `<div class="dexItem ${locked?'locked':''}"><img alt="${s.name}" src="assets/${s.id}.png" onerror="this.style.opacity=.2"></div>`;
+      const cnt = Math.min(3, progress.dexCount[s.idx]||0);
+      return `<div class="dexItem ${locked?'locked':''}">
+        <img alt="${s.name}" src="assets/${s.id}.png" onerror="this.style.opacity=.2">
+        ${locked?`<div class="dexProg">${cnt}/3</div>`:''}
+      </div>`;
     }).join('');
     const facts = Object.entries(progress.dex).filter(([sp,v])=>v).map(([sp])=>{
       const f=FACTS[sp]?.[0]||'この動物の豆知識は準備中です。'; return `<div class="dexFact"><strong>${speciesByIdx[sp]?.name||'動物'}</strong><div>${f}</div></div>`;
-    }).join('') || '<div class="dexFact">まだ解放されていません。まずはゲームで3個以上まとめて消しましょう！</div>';
+    }).join('') || '<div class="dexFact">まだ解放されていません。まずは同じ動物を「3回」消してみましょう！</div>';
     ui.innerHTML = wrap(`
       <div class="title">図鑑</div>
       <div class="dexGrid">${items}</div>
@@ -592,7 +650,6 @@ function renderUI(payload={}){
     document.getElementById('toDex').onclick=()=>setScene('dex');
     return;
   }
-  // play/pause 中はUIなし（フルスクリーン）
   ui.innerHTML='';
 }
 
@@ -600,12 +657,9 @@ function renderUI(payload={}){
 async function boot(){
   initBoard(); buildBG(); initClouds(); initAudio();
   const {notes}=await loadAssets(); bag=new Bag(SPECIES);
-  setScene('title'); // → メニュー → ゲーム
-  draw(); // 初回描画
+  setScene('title'); draw();
   window.addEventListener('resize', draw);
-  // iOSなど：初回タップでAudioContextを解放
   window.addEventListener('pointerdown', unlockAudio, {once:true});
-  // Service Worker（任意）
   if('serviceWorker' in navigator){ try{ await navigator.serviceWorker.register('./sw.js'); }catch{} }
 }
 boot();
