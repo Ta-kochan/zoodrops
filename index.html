@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#2ea44f">
 <link rel="manifest" href="manifest.json">
-<title>ZooDrops – Mobile HUD & Stable (full)</title>
+<title>ZooDrops – Gentle Ramp + 10 Levels</title>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -13,7 +13,6 @@
     --acc:#2ea44f; --danger:#ef4444; --good:#22c55e; --warn:#f59e0b; --sky:#0ea5e9;
   }
   html,body{height:100%;margin:0;background:#dff3ff;font-family:"M PLUS Rounded 1c",system-ui,sans-serif;color:var(--ink)}
-  /* フィールド＝全画面 */
   #stage{position:fixed;inset:0;display:grid;place-items:center;touch-action:none;-webkit-user-select:none;user-select:none;background:
     radial-gradient(30% 40% at 20% 10%, rgba(93,214,255,.35), transparent 60%),
     radial-gradient(30% 40% at 80% 15%, rgba(255,154,184,.30), transparent 60%),
@@ -21,7 +20,7 @@
     linear-gradient(180deg,#9bd3ff,#e8e3ff)}
   canvas{display:block;max-width:100vw;max-height:100vh}
 
-  /* HUD（スマホ上部、セーフエリア対応） */
+  /* HUD */
   .hud{
     position:fixed;left:calc(env(safe-area-inset-left,0px) + 8px);
     right:calc(env(safe-area-inset-right,0px) + 8px);
@@ -43,16 +42,17 @@
   #nextHud{width:42px;height:42px;border-radius:999px;border:1px solid var(--b);background:#fff}
   #nextHudName{font-weight:800;color:#0ea5e9}
 
-  /* UI オーバーレイ（タイトル/メニュー/図鑑/リザルト） */
+  /* UI オーバーレイ */
   #ui{position:fixed;inset:0;display:grid;place-items:center;pointer-events:auto;z-index:20}
   .card{pointer-events:auto;background:var(--glass);border:1px solid var(--b);border-radius:16px;padding:18px 16px;box-shadow:0 12px 30px rgba(16,24,40,.14);backdrop-filter: blur(10px);min-width:min(92vw,460px);max-width:min(92vw,560px)}
-  .title{font-weight:800;font-size:1.8rem;letter-spacing:.5px;display:flex;align-items:center;gap:.6rem;justify-content:center}
+  .title{font-weight:800;font-size:1.8rem;letter-spacing:.5px;display:flex;align-items:center;gap:.6rem;justify-content:center;flex-wrap:wrap}
   .menu{display:grid;gap:10px;margin-top:12px}
   button{background:#fff;border:1px solid var(--b);border-radius:12px;padding:12px 14px;font-size:1.05rem;cursor:pointer;box-shadow:0 6px 16px rgba(16,24,40,.10);transition:transform .06s ease,background .2s}
   button:hover{background:#f6f8ff} button:active{transform:scale(.98)}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center}
   .hint{color:var(--muted);font-size:.9rem}
   .badge{padding:.2rem .6rem;border-radius:999px;border:1px solid var(--b);background:#fff;font-size:.8rem}
+  .level{padding:.2rem .6rem;border-radius:999px;border:1px solid var(--b);background:#fff;font-size:.9rem;color:#0ea5e9;font-weight:800}
 
   /* 図鑑 */
   .dexGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:10px}
@@ -71,7 +71,7 @@
   <canvas id="view" width="360" height="640"></canvas>
 </div>
 
-<!-- ★ HUD（常時） -->
+<!-- HUD -->
 <div id="hud" class="hud" style="display:none">
   <div class="chips">
     <div class="chip">Score <strong id="hudScore">0</strong></div>
@@ -91,16 +91,16 @@
 'use strict';
 
 /* ===================== 基本設定 ===================== */
-const COLS=9, ROWS=16, PPU=14;             // 内部解像度UP（見た目のクリアさ向上）
+const COLS=9, ROWS=16, PPU=14;
 const W=COLS*PPU, H=ROWS*PPU;
 const DPR = window.devicePixelRatio||1;
 
 const view=document.getElementById('view');
 const vctx=view.getContext('2d'); vctx.imageSmoothingEnabled=true; vctx.imageSmoothingQuality='high';
-let PIX=1; // スクリーン倍率（viewportにフィット）
+let PIX=1;
 
-/* ===================== シーン管理（★payload対応 & pointerEvents切替） ===================== */
-let SCENE='boot'; // 'title'|'menu'|'play'|'over'|'options'|'dex'
+/* ===================== シーン管理 ===================== */
+let SCENE='boot';
 const ui=document.getElementById('ui');
 const hudEl=document.getElementById('hud');
 function setScene(s, payload){
@@ -116,25 +116,26 @@ let nextId=1, active=null, upNext=null, floaters=[], particles=[], scorePops=[],
 let board, pidMap, bCanvas, bctx, bImage, registry;
 const CLEAR_COUNT=3, LOCK_DELAY=260, LOCK_VEL_EPS=0.035, BASE_SPAWN_Y=-6, ALPHA_TH=24;
 
-/* 物理（震え対策を含む） */
-const GRAVITY_BASE=0.0026, RAMP_START=0.025, RAMP_END=0.90, RAMP_MS=240000, AIR_DRAG=0.0012;
-/* 反発係数は速度依存（高速ほど非弾性） */
-const REST_V0 = 0.06, REST_V1 = 0.22;     // 無反発～中速の閾値
-const REST_MIN = 0.05, REST_MAX = 0.32;   // 反発係数の範囲
+/* 物理パラメータ（★やさしめ） */
+const GRAVITY_BASE=0.0026;
+// ★加速を2倍ゆっくりに（従来 240_000ms → 480_000ms）
+const RAMP_START=0.025, RAMP_END=0.90, RAMP_MS=480000;
+const AIR_DRAG=0.0012;
+const REST_V0 = 0.06, REST_V1 = 0.22;
+const REST_MIN = 0.05, REST_MAX = 0.32;
 function restitutionForSpeed(preVy){
   const v = Math.abs(preVy);
-  if (v <= REST_V0) return 0; // ごく低速は完全吸収
+  if (v <= REST_V0) return 0;
   const t = Math.min(1, Math.max(0, (v-REST_V0)/(REST_V1-REST_V0)));
   const ease = t*t*(3-2*t);
   let r = REST_MIN + (REST_MAX - REST_MIN) * ease;
-  if (v > 0.30) r = Math.max(0.12, r * 0.65); // 高速は非弾性寄り
+  if (v > 0.30) r = Math.max(0.12, r * 0.65);
   return r;
 }
-/* スリープ（低速が続いたら固定） */
 const SLEEP_VEL=0.09, SLEEP_MS=120;
 const STUCK_BOUNCE_VEL=0.08, WOBBLE_MAX=10;
 
-/* ピースの描画スケール */
+/* スケール */
 const GLOBAL_SCALE=0.05, SCALE_MIN_MULT=0.50, SCALE_MAX_MULT=1.20, AUTO_FIT=true, FIT_FRACTION=0.30;
 
 /* 画像・種別 */
@@ -148,11 +149,7 @@ let progress = loadProgress();
 function loadProgress(){
   try{
     const p = JSON.parse(localStorage.getItem(LSKEY)) || {};
-    return {
-      dex: p.dex || {},                 // {speciesIdx: true}
-      dexCount: p.dexCount || {},       // {speciesIdx: number}
-      opt: p.opt || {sfx:true,bgm:false,vibe:true}
-    };
+    return { dex: p.dex || {}, dexCount: p.dexCount || {}, opt: p.opt || {sfx:true,bgm:false,vibe:true} };
   }catch{ return { dex:{}, dexCount:{}, opt:{sfx:true,bgm:false,vibe:true} }; }
 }
 function saveProgress(){ try{ localStorage.setItem(LSKEY, JSON.stringify(progress)); }catch{} }
@@ -242,7 +239,6 @@ function newActive(){
   const spec=bag.take();
   const k=calcSpawnScale(spec.img);
   const ang=0, rot=rasterize(spec.img,k,ang);
-  // 次ピースのプレビュー更新（今のを取り出した直後にbag.peek）
   upNext = bag.peek(); drawNextHud(upNext);
   return {species:spec.idx,name:spec.name,baseImg:spec.img,scale:k,ang,rot,x:Math.floor(W/2),y:BASE_SPAWN_Y,vy:0,contact:0,wobble:0,lastHitY:null,sleepMs:0};
 }
@@ -275,25 +271,21 @@ function clearPieceOnBoard(id){
   blitBoard();
 }
 
-/* めり込み解消（上方向に抜ける） */
+/* めり込み解消 */
 function resolvePenetrationUp(obj){
   if (!obj || !obj.rot) return;
   let tries = 0;
   const maxTries = Math.min(30, Math.ceil(obj.rot.h));
-  while (collidesAt(obj.x, obj.y, obj.rot) && tries < maxTries){
-    obj.y -= 0.5;  // 0.5盤面pxずつ上へ
-    tries++;
-  }
+  while (collidesAt(obj.x, obj.y, obj.rot) && tries < maxTries){ obj.y -= 0.5; tries++; }
 }
 
-/* ===================== 入力：スマホ（2本指回転／1本指ドラッグ＆フリック） ===================== */
+/* ===================== 入力（スマホ） ===================== */
 const wrap=document.getElementById('stage');
 const pointers=new Map();
-const gesture={
-  primary:null, startX:0,startY:0,lastX:0,lastY:0,accX:0,accY:0,startT:0,
-  rotating:false, rotStart:0, pieceStartAng:0, applied:0
-};
+const gesture={primary:null,startX:0,startY:0,lastX:0,lastY:0,accX:0,accY:0,startT:0,rotating:false,rotStart:0,pieceStartAng:0,applied:0};
 const MOVE_STEP_X=4, MOVE_STEP_Y=4, HARD_SPEED=0.9, MIN_FLICK_DIST=30, ROT_APPLY_STEP=6;
+// ★横感度+20%：同じ指移動量で1.2倍動く
+const HORIZ_SENSE=1.2;
 
 function toBoardXY(e){ const r=view.getBoundingClientRect(); return {x:(e.clientX-r.left)/PIX, y:(e.clientY-r.top)/PIX}; }
 function angleDeg(p1,p2){ return Math.atan2(p2.y-p1.y, p2.x-p1.x)*180/Math.PI; }
@@ -303,19 +295,13 @@ wrap.addEventListener('pointerdown',e=>{
   e.preventDefault(); wrap.setPointerCapture(e.pointerId);
   const pt=toBoardXY(e);
   pointers.set(e.pointerId,{x:pt.x,y:pt.y,t:performance.now()});
-
   if(pointers.size===1){
-    // 1本指：移動/フリック
     gesture.primary=e.pointerId; gesture.startX=pt.x; gesture.startY=pt.y;
     gesture.lastX=pt.x; gesture.lastY=pt.y; gesture.accX=0; gesture.accY=0;
     gesture.startT=performance.now(); gesture.rotating=false; gesture.applied=0;
   }else if(pointers.size===2){
-    // 2本指：回転
     const it=[...pointers.values()];
-    gesture.rotating=true;
-    gesture.rotStart=angleDeg(it[0],it[1]);
-    gesture.pieceStartAng=active? active.ang:0;
-    gesture.applied=0;
+    gesture.rotating=true; gesture.rotStart=angleDeg(it[0],it[1]); gesture.pieceStartAng=active? active.ang:0; gesture.applied=0;
   }
 },{passive:false});
 
@@ -325,25 +311,19 @@ wrap.addEventListener('pointermove',e=>{
   const pt=toBoardXY(e);
   const p=pointers.get(e.pointerId); p.x=pt.x; p.y=pt.y; p.t=performance.now();
 
-  // 2本指回転
   if(pointers.size>=2 && active){
-    const it=[...pointers.values()];
-    const curr=angleDeg(it[0],it[1]);
-    let delta=curr - gesture.rotStart;
-    delta=((delta+540)%360)-180; // -180..180
+    const it=[...pointers.values()], curr=angleDeg(it[0],it[1]);
+    let delta=curr - gesture.rotStart; delta=((delta+540)%360)-180;
     while(Math.abs(delta - gesture.applied) >= ROT_APPLY_STEP){
       const step = ROT_APPLY_STEP * Math.sign(delta - gesture.applied);
-      const ok = tryRotateTo(active, active.ang + step);
-      if(!ok) break;
-      gesture.applied += step;
+      const ok = tryRotateTo(active, active.ang + step); if(!ok) break; gesture.applied += step;
     }
     return;
   }
 
-  // 1本指：左右移動＋下送り（ソフト）
   if(gesture.primary===e.pointerId && active && state==='playing'){
-    const dx=pt.x - gesture.lastX;
-    const dy=pt.y - gesture.lastY;
+    const dx=(pt.x - gesture.lastX)*HORIZ_SENSE;  // ★横だけ1.2倍
+    const dy=(pt.y - gesture.lastY);
     gesture.lastX=pt.x; gesture.lastY=pt.y;
     gesture.accX += dx; gesture.accY += dy;
 
@@ -354,8 +334,7 @@ wrap.addEventListener('pointermove',e=>{
     }
     while(gesture.accY >= MOVE_STEP_Y){
       if(!moveWithCollision(active, 1)) { active.contact = active.contact||performance.now(); break; }
-      gesture.accY -= MOVE_STEP_Y;
-      score += 0.2;
+      gesture.accY -= MOVE_STEP_Y; score += 0.2;
     }
   }
 },{passive:false});
@@ -364,11 +343,8 @@ function releasePointer(e){
   if(!pointers.has(e.pointerId)) return;
   const ended=pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
-
   if(SCENE==='play' && state==='playing' && !gesture.rotating && e.pointerId===gesture.primary){
-    const dt=performance.now() - gesture.startT;
-    const dy=ended.y - gesture.startY;
-    const vy= dy>0 ? dy/dt : 0;
+    const dt=performance.now() - gesture.startT, dy=ended.y - gesture.startY, vy= dy>0 ? dy/dt : 0;
     if(dy>MIN_FLICK_DIST && vy>HARD_SPEED){ hard(); }
   }
   if(pointers.size<2){ gesture.rotating=false; gesture.applied=0; }
@@ -376,7 +352,7 @@ function releasePointer(e){
 wrap.addEventListener('pointerup', releasePointer, {passive:false});
 wrap.addEventListener('pointercancel', releasePointer, {passive:false});
 
-/* ===================== キー操作（PCデバッグ用） ===================== */
+/* ===================== キー操作（PCデバッグ） ===================== */
 const key={}; document.addEventListener('keydown',e=>{ key[e.key]=true; if(SCENE!=='play') return;
   if(e.key==='ArrowLeft') nudge(-1,0,0);
   if(e.key==='ArrowRight') nudge(1,0,0);
@@ -395,7 +371,7 @@ function nudge(dx,dy,dang){
   if(!collidesAt(nx,ny,cand.rot)){ active.x=nx; active.y=ny; if(dang){ active.ang=cand.ang; active.rot=cand.rot; playSFX('rot'); } }
 }
 
-/* ===================== 物理・ループ（安定化含む） ===================== */
+/* ===================== 物理・ループ ===================== */
 function integrateVelocity(vy,g,dt){ const c=AIR_DRAG; if(c>0){ const e=Math.exp(-c*dt); return vy*e+(g/c)*(1-e);} return vy+g*dt; }
 function moveWithCollision(body,dy){ const dir=Math.sign(dy)||1; let remain=Math.abs(dy); const STEP=0.25; let moved=false; while(remain>0){ const s=Math.min(STEP,remain); const ny=body.y+dir*s; if(collidesAt(body.x,ny,body.rot)) return moved; body.y=ny; remain-=s; moved=true; } return true; }
 
@@ -406,7 +382,7 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 function loop(now){
-  if(SCENE!=='play' || state==='over') return;  // resolving でも回す
+  if(SCENE!=='play' || state==='over') return;
   const dt=now-last; last=now; playTimeMs = now - startTime;
   updateClouds(dt);
 
@@ -421,10 +397,8 @@ function loop(now){
     if(!moveWithCollision(active,fall)){
       if(active.vy>0){
         const impactY=Math.floor(active.y), pre=active.vy, R=restitutionForSpeed(pre);
-        active.y = impactY;
-        active.vy = -pre*R;
+        active.y = impactY; active.vy = -pre*R;
         if(R===0) active.contact = now - LOCK_DELAY;
-        // 確実にめり込み解消
         resolvePenetrationUp(active);
 
         const bounced=Math.abs(active.vy), near=(active.lastHitY===null)||Math.abs(impactY-active.lastHitY)<=1; active.lastHitY=impactY;
@@ -432,7 +406,6 @@ function loop(now){
         if(active.wobble>=WOBBLE_MAX){ active.vy=0; active.contact=now-LOCK_DELAY; }
         playSFX('land');
       }
-      // スリープ（低速が続いたら固定）
       if(Math.abs(active.vy) < SLEEP_VEL){ active.sleepMs = (active.sleepMs||0) + dt; if(active.sleepMs>=SLEEP_MS){ active.vy=0; active.contact=now-LOCK_DELAY; } }
       else active.sleepMs=0;
 
@@ -444,7 +417,7 @@ function loop(now){
     updateFloaters(dt, now);
   }
 
-  updateParticles(dt); updateScorePops(dt); draw(); drawHUD();   // HUD更新
+  updateParticles(dt); updateScorePops(dt); draw(); drawHUD();
   requestAnimationFrame(loop);
 }
 
@@ -494,12 +467,10 @@ function resolveStep(){
     const base=60*g.ids.size, pts=Math.floor(base*chainFactor); stepPoints+=pts; clearedSpeciesThisStep.add(g.species);
     if(n>0) spawnScorePop(sx/n, sy/n, '+'+pts.toLocaleString(), speciesColor(g.species), false);
 
-    // 図鑑：この“1回の消去”をカウント（3回で解放）
     const sp=g.species;
     progress.dexCount[sp] = (progress.dexCount[sp]||0) + 1;
     if(!progress.dex[sp] && progress.dexCount[sp] >= 3){
-      progress.dex[sp] = true;
-      unlockedNow.push(sp);
+      progress.dex[sp] = true; unlockedNow.push(sp);
     }
   }
   if(unlockedNow.length){ saveProgress(); showToast(`図鑑：${unlockedNow.map(sp=>speciesByIdx[sp]?.name||'動物').join('・')} を解放！`); }
@@ -508,7 +479,6 @@ function resolveStep(){
   lastChain++; score+=stepPoints; totalClears+=groups.length;
   for(const id of toDelete){ clearPieceOnBoard(id); registry.delete(id); }
 
-  // “3回で全消し”
   const toWipe=[];
   for(const sp of clearedSpeciesThisStep){ speciesStreak[sp]+=1; if(speciesStreak[sp]>=3){ speciesStreak[sp]=0; toWipe.push(sp); } }
   for(const sp of toWipe){
@@ -536,17 +506,14 @@ function updateFloaters(dt,now){
     if(!moveFloater(f,fall)){
       if(f.vy>0){
         const impactY=Math.floor(f.y),pre=f.vy,R=restitutionForSpeed(pre);
-        f.y = impactY;
-        f.vy = -pre*R;
+        f.y = impactY; f.vy = -pre*R;
         if(R===0) f.contact = performance.now() - LOCK_DELAY;
-        // 確実にめり込み解消
         resolvePenetrationUp(f);
 
         const bounced=Math.abs(f.vy), near=(f.lastHitY===null)||Math.abs(impactY-f.lastHitY)<=1; f.lastHitY=impactY;
         if(near && bounced<STUCK_BOUNCE_VEL) f.wobble++; else f.wobble=0;
         if(f.wobble>=WOBBLE_MAX){ f.vy=0; f.contact=performance.now()-LOCK_DELAY; }
       }
-      // スリープ
       if(Math.abs(f.vy) < SLEEP_VEL){ f.sleepMs = (f.sleepMs||0) + dt; if(f.sleepMs>=SLEEP_MS){ f.vy=0; f.contact=performance.now()-LOCK_DELAY; } }
       else f.sleepMs=0;
 
@@ -587,7 +554,6 @@ function drawScorePops(pix){
   vctx.restore();
 }
 function draw(){
-  // ビューポートにフィット
   const vw=window.innerWidth, vh=window.innerHeight, scale=Math.floor(Math.min(vw/W, vh/H)); PIX=scale>0?scale:1;
   view.style.width=(W*PIX)+'px'; view.style.height=(H*PIX)+'px';
   view.width=Math.floor(W*PIX*DPR); view.height=Math.floor(H*PIX*DPR); vctx.setTransform(DPR,0,0,DPR,0,0);
@@ -608,28 +574,20 @@ function draw(){
   if(flash>0){ vctx.save(); vctx.globalAlpha=flash; vctx.fillStyle='rgba(255,255,255,.9)'; vctx.fillRect(0,0,W*PIX,H*PIX); vctx.restore(); }
 }
 
-/* ===================== HUD（Score/Chain/Clears & Next） ===================== */
+/* ===================== HUD ===================== */
 const hudScore=document.getElementById('hudScore');
 const hudChain=document.getElementById('hudChain');
 const hudClears=document.getElementById('hudClears');
 const nextCanvas=document.getElementById('nextHud');
 const nctx=nextCanvas.getContext('2d');
 const nextNameEl=document.getElementById('nextHudName');
-
-function drawHUD(){
-  hudScore.textContent = Math.floor(score).toLocaleString();
-  hudChain.textContent = lastChain;
-  hudClears.textContent = totalClears;
-}
+function drawHUD(){ hudScore.textContent = Math.floor(score).toLocaleString(); hudChain.textContent = lastChain; hudClears.textContent = totalClears; }
 function drawNextHud(spec){
   nctx.clearRect(0,0,nextCanvas.width,nextCanvas.height);
   if(!spec){ nextNameEl.textContent='—'; return; }
   nextNameEl.textContent = spec.name || spec.id;
-  const baseScale = GLOBAL_SCALE * 0.62;
-  let k = baseScale;
-  const maxIn = 36; const long = Math.max(imgW(spec.img), imgH(spec.img));
-  const fit = (maxIn / long);
-  k = Math.min(k, fit);
+  const baseScale = GLOBAL_SCALE * 0.62; let k = baseScale;
+  const maxIn = 36; const long = Math.max(imgW(spec.img), imgH(spec.img)); k = Math.min(k, (maxIn/long));
   const rot = rasterize(spec.img, k, 0);
   const off = document.createElement('canvas'); off.width=rot.w; off.height=rot.h;
   off.getContext('2d').putImageData(new ImageData(rot.rgba, rot.w, rot.h), 0, 0);
@@ -637,24 +595,36 @@ function drawNextHud(spec){
   nctx.drawImage(off, dx, dy);
 }
 
-/* ===================== トースト・ゲームオーバー（エモ評価） ===================== */
+/* ===================== 結果（10段階レベル） ===================== */
 const toast=document.getElementById('toast');
 function showToast(msg){ toast.textContent=msg; toast.style.opacity='1';
   toast.animate([{transform:'translateX(-50%) translateY(-6px) scale(.98)',opacity:0},{transform:'translateX(-50%) translateY(0) scale(1)',opacity:1,offset:.2},{transform:'translateX(-50%) translateY(0) scale(1)',opacity:1,offset:.8},{transform:'translateX(-50%) translateY(-6px) scale(.98)',opacity:0}],{duration:1400,easing:'ease-out'}).onfinish=()=>{toast.style.opacity='0'}; }
 
-function evaluateComment(sc, ch, cl, t){
+function evaluateComment10(sc, ch, cl, t){
   const base = sc + ch*600 + cl*250 - Math.max(0,(t-240))*3;
-  if(base >= 60000) return {emoji:'🦁', title:'伝説の動物学者！', sub:'すべての生態が手の内だ。新種発見も夢じゃない。'};
-  if(base >= 35000) return {emoji:'🦒', title:'エキスパート動物学者レベル。', sub:'より一層の研究に励もう！'};
-  if(base >= 20000) return {emoji:'🦓', title:'上級観察者。', sub:'群れの動きが見えてきた！'};
-  if(base >=  9000) return {emoji:'🦘', title:'フィールドワーカー。', sub:'だんだん勘が冴えてきた。'};
-  return {emoji:'🐾', title:'見習い新人レベル！', sub:'冒険はまだまだこれからだ。'};
+  // 閾値（Lv1〜10）。必要に応じてチューニングしてください。
+  const th = [0, 4000, 8000, 12000, 17000, 23000, 30000, 38000, 48000, 60000];
+  let level = 1;
+  for(let i=th.length-1;i>=0;i--){ if(base >= th[i]){ level = i+1; break; } }
+  const lines = {
+    1: {emoji:'🐾', title:'見習い新人レベル！', sub:'冒険はまだまだこれからだ。'},
+    2: {emoji:'🐣', title:'はじめの一歩。', sub:'動物たちと仲良くなろう。'},
+    3: {emoji:'🦝', title:'見習い観察者。', sub:'つながりを意識して消してみよう。'},
+    4: {emoji:'🦊', title:'駆け出しフィールドワーカー。', sub:'少しずつコツが掴めてきた！'},
+    5: {emoji:'🐘', title:'中級の扉が開いた。', sub:'連鎖で一気に流れを作ろう。'},
+    6: {emoji:'🦘', title:'フィールドワーカー。', sub:'テンポ良く観察と判断！'},
+    7: {emoji:'🦓', title:'上級観察者。', sub:'群れの動きが見えてきた！'},
+    8: {emoji:'🦒', title:'エキスパート動物学者。', sub:'より一層の研究に励もう！'},
+    9: {emoji:'🦍', title:'マスタークラス。', sub:'わずかな隙も見逃さない鋭さ。'},
+    10:{emoji:'🦁', title:'伝説の動物学者！', sub:'すべての生態が手の内だ。'}
+  };
+  return { level, max:10, ...lines[level], base };
 }
 
 function gameOver(reason){
   state='over';
   const tSec = Math.round((performance.now()-startTime)/1000);
-  const comment = evaluateComment(score, lastChain, totalClears, tSec);
+  const comment = evaluateComment10(score, lastChain, totalClears, tSec);
   setScene('over', {reason, comment, score, chains:lastChain, clears:totalClears, time:tSec});
 }
 
@@ -671,7 +641,7 @@ function initAudio(){
 }
 async function loadBuffer(url, key, sub){
   try{ const r=await fetch(url); if(!r.ok) throw 0; const b=await r.arrayBuffer(); const buf=await SFX.ctx.decodeAudioData(b); if(key==='cry') SFX.cry[sub]=buf; else SFX[key]=buf; }
-  catch{ /* 無ければ無音のまま */ }
+  catch{}
 }
 async function loadMusic(url){ try{ const r=await fetch(url); if(!r.ok) throw 0; const b=await r.arrayBuffer(); SFX.bgm = await SFX.ctx.decodeAudioData(b); }catch{} }
 function unlockAudio(){ if(SFX.unlocked||!SFX.ctx) return; SFX.unlocked=true; const o=SFX.ctx.createOscillator(), g=SFX.ctx.createGain(); o.type='sine'; o.frequency.value=1; g.gain.value=0; o.connect(g).connect(SFX.ctx.destination); o.start(); o.stop(SFX.ctx.currentTime+0.01); if(progress.opt.bgm && SFX.bgm) playBGM(); }
@@ -764,8 +734,9 @@ function renderUI(payload={}){
     const emoji = comment.emoji || '🐾';
     const title = comment.title || '結果';
     const sub   = comment.sub   || '';
+    const lvText = (comment.level!=null)? `<span class="level">Lv.${comment.level}/10</span>`:'';
     ui.innerHTML = wrap(`
-      <div class="title">${emoji} ${title}</div>
+      <div class="title">${emoji} ${title} ${lvText}</div>
       <div class="hint" style="text-align:center;margin-top:6px">${sub}</div>
       <div class="row" style="margin-top:10px">Score <strong>${score.toLocaleString()}</strong>／Chain <strong>${chains}</strong>／Clears <strong>${clears}</strong>／Time <strong>${time}s</strong></div>
       <div class="hint" style="text-align:center;margin-top:6px">${reason?('※ '+reason):''}</div>
