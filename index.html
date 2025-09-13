@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
 <meta name="theme-color" content="#2ea44f">
 <link rel="manifest" href="manifest.json">
-<title>ZooDrops – Mobile HUD & Stable</title>
+<title>ZooDrops – Mobile HUD & Stable (full)</title>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -44,7 +44,7 @@
   #nextHudName{font-weight:800;color:#0ea5e9}
 
   /* UI オーバーレイ（タイトル/メニュー/図鑑/リザルト） */
-  #ui{position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;z-index:20}
+  #ui{position:fixed;inset:0;display:grid;place-items:center;pointer-events:auto;z-index:20}
   .card{pointer-events:auto;background:var(--glass);border:1px solid var(--b);border-radius:16px;padding:18px 16px;box-shadow:0 12px 30px rgba(16,24,40,.14);backdrop-filter: blur(10px);min-width:min(92vw,460px);max-width:min(92vw,560px)}
   .title{font-weight:800;font-size:1.8rem;letter-spacing:.5px;display:flex;align-items:center;gap:.6rem;justify-content:center}
   .menu{display:grid;gap:10px;margin-top:12px}
@@ -99,27 +99,40 @@ const view=document.getElementById('view');
 const vctx=view.getContext('2d'); vctx.imageSmoothingEnabled=true; vctx.imageSmoothingQuality='high';
 let PIX=1; // スクリーン倍率（viewportにフィット）
 
-/* ===================== シーン管理 ===================== */
+/* ===================== シーン管理（★payload対応 & pointerEvents切替） ===================== */
 let SCENE='boot'; // 'title'|'menu'|'play'|'over'|'options'|'dex'
 const ui=document.getElementById('ui');
 const hudEl=document.getElementById('hud');
-function setScene(s){ SCENE=s; renderUI(); hudEl.style.display = (s==='play') ? '' : 'none'; }
+function setScene(s, payload){
+  SCENE = s;
+  hudEl.style.display = (s === 'play') ? '' : 'none';
+  ui.style.pointerEvents = (s === 'play') ? 'none' : 'auto';
+  renderUI(payload || {});
+}
 
 /* ===================== ゲームステート ===================== */
 let state='paused', last=0, score=0, totalClears=0, lastChain=0, startTime=0, playTimeMs=0;
 let nextId=1, active=null, upNext=null, floaters=[], particles=[], scorePops=[], clouds=[], flash=0;
 let board, pidMap, bCanvas, bctx, bImage, registry;
-const CLEAR_COUNT=3, LOCK_DELAY=260, LOCK_VEL_EPS=0.022, BASE_SPAWN_Y=-6, ALPHA_TH=24;
+const CLEAR_COUNT=3, LOCK_DELAY=260, LOCK_VEL_EPS=0.035, BASE_SPAWN_Y=-6, ALPHA_TH=24;
 
-/* 物理（震え対策を強化） */
-const GRAVITY_BASE=0.0026, RAMP_START=0.025, RAMP_END=0.90, RAMP_MS=240000, AIR_DRAG=0.0012, RESTITUTION=0.52;
-/* ★微速反発をさらに減らす */
-const REST_V0=0.05, REST_V1=0.22, REST_MIN=0.08;
-/* ★スリープ＆スナップで安定化 */
-const SLEEP_VEL=0.06, SLEEP_MS=140;      // 低速が続いたら固定
-const SNAP_STEP=0.25, SNAP_STEPS=6;      // 衝突時に微上方へスナップ
+/* 物理（震え対策を含む） */
+const GRAVITY_BASE=0.0026, RAMP_START=0.025, RAMP_END=0.90, RAMP_MS=240000, AIR_DRAG=0.0012;
+/* 反発係数は速度依存（高速ほど非弾性） */
+const REST_V0 = 0.06, REST_V1 = 0.22;     // 無反発～中速の閾値
+const REST_MIN = 0.05, REST_MAX = 0.32;   // 反発係数の範囲
+function restitutionForSpeed(preVy){
+  const v = Math.abs(preVy);
+  if (v <= REST_V0) return 0; // ごく低速は完全吸収
+  const t = Math.min(1, Math.max(0, (v-REST_V0)/(REST_V1-REST_V0)));
+  const ease = t*t*(3-2*t);
+  let r = REST_MIN + (REST_MAX - REST_MIN) * ease;
+  if (v > 0.30) r = Math.max(0.12, r * 0.65); // 高速は非弾性寄り
+  return r;
+}
+/* スリープ（低速が続いたら固定） */
+const SLEEP_VEL=0.09, SLEEP_MS=120;
 const STUCK_BOUNCE_VEL=0.08, WOBBLE_MAX=10;
-function restitutionForSpeed(preVy){ const v=Math.abs(preVy); if(v<=REST_V0) return 0; const t=Math.min(1,Math.max(0,(v-REST_V0)/(REST_V1-REST_V0))); const s=t*t*(3-2*t); return REST_MIN+(RESTITUTION-REST_MIN)*s; }
 
 /* ピースの描画スケール */
 const GLOBAL_SCALE=0.05, SCALE_MIN_MULT=0.50, SCALE_MAX_MULT=1.20, AUTO_FIT=true, FIT_FRACTION=0.30;
@@ -229,7 +242,7 @@ function newActive(){
   const spec=bag.take();
   const k=calcSpawnScale(spec.img);
   const ang=0, rot=rasterize(spec.img,k,ang);
-  // ★Next 更新（今のを出した直後、次の候補をHUDに表示）
+  // 次ピースのプレビュー更新（今のを取り出した直後にbag.peek）
   upNext = bag.peek(); drawNextHud(upNext);
   return {species:spec.idx,name:spec.name,baseImg:spec.img,scale:k,ang,rot,x:Math.floor(W/2),y:BASE_SPAWN_Y,vy:0,contact:0,wobble:0,lastHitY:null,sleepMs:0};
 }
@@ -260,6 +273,17 @@ function placeToBoard(id,species,x,y,rot){
 function clearPieceOnBoard(id){
   for(let i=0;i<pidMap.length;i++) if(pidMap[i]===id){ pidMap[i]=0; board[i]=0; const p=i<<2; bImage.data[p]=0; bImage.data[p+1]=0; bImage.data[p+2]=0; bImage.data[p+3]=0; }
   blitBoard();
+}
+
+/* めり込み解消（上方向に抜ける） */
+function resolvePenetrationUp(obj){
+  if (!obj || !obj.rot) return;
+  let tries = 0;
+  const maxTries = Math.min(30, Math.ceil(obj.rot.h));
+  while (collidesAt(obj.x, obj.y, obj.rot) && tries < maxTries){
+    obj.y -= 0.5;  // 0.5盤面pxずつ上へ
+    tries++;
+  }
 }
 
 /* ===================== 入力：スマホ（2本指回転／1本指ドラッグ＆フリック） ===================== */
@@ -382,7 +406,7 @@ function startGame(){
   requestAnimationFrame(loop);
 }
 function loop(now){
-  if(SCENE!=='play' || state==='over') return;
+  if(SCENE!=='play' || state==='over') return;  // resolving でも回す
   const dt=now-last; last=now; playTimeMs = now - startTime;
   updateClouds(dt);
 
@@ -397,17 +421,18 @@ function loop(now){
     if(!moveWithCollision(active,fall)){
       if(active.vy>0){
         const impactY=Math.floor(active.y), pre=active.vy, R=restitutionForSpeed(pre);
-        active.y=impactY; active.vy=-pre*R; if(R===0) active.contact=now-LOCK_DELAY;
-
-        // ★微上方スナップ（めり込み解消）
-        for(let k=0;k<SNAP_STEPS && collidesAt(active.x, active.y, active.rot); k++){ active.y -= SNAP_STEP; }
+        active.y = impactY;
+        active.vy = -pre*R;
+        if(R===0) active.contact = now - LOCK_DELAY;
+        // 確実にめり込み解消
+        resolvePenetrationUp(active);
 
         const bounced=Math.abs(active.vy), near=(active.lastHitY===null)||Math.abs(impactY-active.lastHitY)<=1; active.lastHitY=impactY;
         if(near && bounced<STUCK_BOUNCE_VEL) active.wobble++; else active.wobble=0;
         if(active.wobble>=WOBBLE_MAX){ active.vy=0; active.contact=now-LOCK_DELAY; }
         playSFX('land');
       }
-      // ★スリープ（低速が続いたら固定）
+      // スリープ（低速が続いたら固定）
       if(Math.abs(active.vy) < SLEEP_VEL){ active.sleepMs = (active.sleepMs||0) + dt; if(active.sleepMs>=SLEEP_MS){ active.vy=0; active.contact=now-LOCK_DELAY; } }
       else active.sleepMs=0;
 
@@ -419,7 +444,7 @@ function loop(now){
     updateFloaters(dt, now);
   }
 
-  updateParticles(dt); updateScorePops(dt); draw(); drawHUD();   // ★HUD更新
+  updateParticles(dt); updateScorePops(dt); draw(); drawHUD();   // HUD更新
   requestAnimationFrame(loop);
 }
 
@@ -510,14 +535,18 @@ function updateFloaters(dt,now){
     if(f.settling) continue; f.vy=integrateVelocity(f.vy,g,dt); const fall=f.vy*dt;
     if(!moveFloater(f,fall)){
       if(f.vy>0){
-        const impactY=Math.floor(f.y),pre=f.vy,R=restitutionForSpeed(pre); f.y=impactY; f.vy=-pre*R; if(R===0) f.contact=performance.now()-LOCK_DELAY;
-        // ★スナップ
-        for(let k=0;k<SNAP_STEPS && collidesAt(f.x, f.y, f.rot); k++){ f.y -= SNAP_STEP; }
+        const impactY=Math.floor(f.y),pre=f.vy,R=restitutionForSpeed(pre);
+        f.y = impactY;
+        f.vy = -pre*R;
+        if(R===0) f.contact = performance.now() - LOCK_DELAY;
+        // 確実にめり込み解消
+        resolvePenetrationUp(f);
+
         const bounced=Math.abs(f.vy), near=(f.lastHitY===null)||Math.abs(impactY-f.lastHitY)<=1; f.lastHitY=impactY;
         if(near && bounced<STUCK_BOUNCE_VEL) f.wobble++; else f.wobble=0;
         if(f.wobble>=WOBBLE_MAX){ f.vy=0; f.contact=performance.now()-LOCK_DELAY; }
       }
-      // ★スリープ
+      // スリープ
       if(Math.abs(f.vy) < SLEEP_VEL){ f.sleepMs = (f.sleepMs||0) + dt; if(f.sleepMs>=SLEEP_MS){ f.vy=0; f.contact=performance.now()-LOCK_DELAY; } }
       else f.sleepMs=0;
 
@@ -614,7 +643,6 @@ function showToast(msg){ toast.textContent=msg; toast.style.opacity='1';
   toast.animate([{transform:'translateX(-50%) translateY(-6px) scale(.98)',opacity:0},{transform:'translateX(-50%) translateY(0) scale(1)',opacity:1,offset:.2},{transform:'translateX(-50%) translateY(0) scale(1)',opacity:1,offset:.8},{transform:'translateX(-50%) translateY(-6px) scale(.98)',opacity:0}],{duration:1400,easing:'ease-out'}).onfinish=()=>{toast.style.opacity='0'}; }
 
 function evaluateComment(sc, ch, cl, t){
-  // ざっくり指標：スコア＋連鎖/クリアの重み付け − 長時間ペナルティ
   const base = sc + ch*600 + cl*250 - Math.max(0,(t-240))*3;
   if(base >= 60000) return {emoji:'🦁', title:'伝説の動物学者！', sub:'すべての生態が手の内だ。新種発見も夢じゃない。'};
   if(base >= 35000) return {emoji:'🦒', title:'エキスパート動物学者レベル。', sub:'より一層の研究に励もう！'};
@@ -627,8 +655,7 @@ function gameOver(reason){
   state='over';
   const tSec = Math.round((performance.now()-startTime)/1000);
   const comment = evaluateComment(score, lastChain, totalClears, tSec);
-  setScene('over');
-  renderUI({reason,comment,score,chains:lastChain,clears:totalClears,time:tSec});
+  setScene('over', {reason, comment, score, chains:lastChain, clears:totalClears, time:tSec});
 }
 
 /* ===================== サウンド ===================== */
@@ -733,10 +760,13 @@ function renderUI(payload={}){
     return;
   }
   if(SCENE==='over'){
-    const {reason,comment,score,chains,clears,time}=payload;
+    const {reason,comment={},score=0,chains=0,clears=0,time=0}=payload;
+    const emoji = comment.emoji || '🐾';
+    const title = comment.title || '結果';
+    const sub   = comment.sub   || '';
     ui.innerHTML = wrap(`
-      <div class="title">${comment.emoji} ${comment.title}</div>
-      <div class="hint" style="text-align:center;margin-top:6px">${comment.sub}</div>
+      <div class="title">${emoji} ${title}</div>
+      <div class="hint" style="text-align:center;margin-top:6px">${sub}</div>
       <div class="row" style="margin-top:10px">Score <strong>${score.toLocaleString()}</strong>／Chain <strong>${chains}</strong>／Clears <strong>${clears}</strong>／Time <strong>${time}s</strong></div>
       <div class="hint" style="text-align:center;margin-top:6px">${reason?('※ '+reason):''}</div>
       <div class="menu" style="margin-top:12px">

@@ -1,6 +1,6 @@
 // sw.js
 // ★デプロイ毎に v番号を上げる
-const CACHE_NAME = 'zoodrops-v3';
+const CACHE_NAME = 'zoodrops-v5';
 
 // オフラインで最低限必要なファイル（まずはこれだけでOK。増やしたら追記）
 const ASSETS = [
